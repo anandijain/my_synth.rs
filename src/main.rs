@@ -1,30 +1,37 @@
+use anyhow::Result;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    FromSample, Sample, SizedSample,
+    Sample,
 };
-use crossterm::event::{read, KeyCode, KeyEvent};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use crossterm::event::{read, Event, KeyCode, KeyEvent};
+use crossterm::terminal::enable_raw_mode;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
-use std::thread::sleep;
-use std::time::Duration;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> Result<()> {
+    // Enable raw mode
+    enable_raw_mode()?;
+
     let host = cpal::default_host();
     let device = host
         .default_output_device()
         .expect("failed to find output device");
     println!("Output device: {}", device.name()?);
 
-    let config = device.default_output_config().unwrap().into();
+    let config = device.default_output_config().unwrap();
     println!("Default output config: {:?}", config);
 
-    run::<f32>(&device, &config)
+    match config.sample_format() {
+        cpal::SampleFormat::F32 => run::<f32>(&device, &config.into())?,
+        sample_format => panic!("Unsupported sample format '{:?}'", sample_format),
+    }
+
+    Ok(())
 }
 
 pub fn run<T>(device: &cpal::Device, config: &cpal::StreamConfig) -> Result<(), anyhow::Error>
 where
-    T: SizedSample + FromSample<f32>,
+    T: cpal::Sample + cpal::FromSample<f32> + cpal::SizedSample, // Added SizedSample trait
 {
     let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
@@ -50,24 +57,20 @@ where
             write_data(data, channels, &mut next_value)
         },
         err_fn,
-        None,
+        None, // Added Option<Duration>
     )?;
     stream.play()?;
 
-    std::thread::spawn(move || loop {
-        if let Ok(crossterm::event::Event::Key(KeyEvent { code, .. })) = read() {
+    loop {
+        if let Ok(Event::Key(KeyEvent { code, .. })) = read() {
             if code == KeyCode::Char('t') {
                 let mut on = tone_on_clone.lock().unwrap();
                 *on = !*on;
             }
-            if code == KeyCode::Char('q') {
+            if code == KeyCode::Esc {
                 break;
             }
         }
-    });
-
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
     Ok(())
@@ -75,7 +78,7 @@ where
 
 fn write_data<T>(output: &mut [T], channels: usize, next_sample: &mut dyn FnMut() -> f32)
 where
-    T: Sample + FromSample<f32>,
+    T: cpal::Sample + cpal::FromSample<f32>,
 {
     for frame in output.chunks_mut(channels) {
         let value: T = T::from_sample(next_sample());
