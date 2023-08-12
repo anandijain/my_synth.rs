@@ -393,6 +393,7 @@ dependencies = [
  "anyhow",
  "cpal",
  "crossterm",
+ "lazy_static",
 ]
 
 [[package]]
