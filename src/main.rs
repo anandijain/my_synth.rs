@@ -1,7 +1,7 @@
 use anyhow::Result;
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    Sample,
+    Sample, SupportedStreamConfig,
 };
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
 use crossterm::terminal::enable_raw_mode;
@@ -17,9 +17,18 @@ fn main() -> Result<()> {
         .default_output_device()
         .expect("failed to find output device");
     println!("Output device: {}", device.name()?);
+    let def_config = device.default_output_config().unwrap();
 
-    let config = device.default_output_config().unwrap();
-    println!("Default output config: {:?}", config);
+    let config = SupportedStreamConfig::new(
+        def_config.channels(),
+        def_config.sample_rate(),
+        cpal::SupportedBufferSize::Range { min: 16, max: 32 },
+        def_config.sample_format(),
+    );
+    // config.buffer_size = cpal::BufferSize::Fixed(256); // Set the buffer size to 256 samples
+
+    println!("Default output config: {:?}", def_config);
+    println!("my config: {:?}", config);
 
     match config.sample_format() {
         cpal::SampleFormat::F32 => run::<f32>(&device, &config.into())?,
@@ -43,7 +52,7 @@ where
     let mut next_value = move || {
         if *tone_on.lock().unwrap() {
             sample_clock = (sample_clock + 1.0) % sample_rate;
-            (sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin()
+            (sample_clock * 440.0 * 2.0 * std::f32::consts::PI / sample_rate).sin() * 0.5 
         } else {
             0.0
         }
@@ -63,7 +72,7 @@ where
 
     loop {
         if let Ok(Event::Key(KeyEvent { code, .. })) = read() {
-            if code == KeyCode::Char('t') {
+            if code == KeyCode::Char(' ') {
                 let mut on = tone_on_clone.lock().unwrap();
                 *on = !*on;
             }
