@@ -8,8 +8,8 @@ use cpal::{
 };
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
 use crossterm::terminal::enable_raw_mode;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::{collections::HashMap, io::Write};
 
 lazy_static! {
     static ref NOTE_MAPPING: Vec<(&'static str, i32)> = vec![
@@ -100,38 +100,23 @@ where
     T: cpal::Sample + cpal::FromSample<f32> + cpal::SizedSample,
 {
     let mut current_octave = 3;
+    let mut velocity = 127; // Default MIDI velocity
+
     let sample_rate = config.sample_rate.0 as f32;
     let channels = config.channels as usize;
 
     let mut sample_clock = 0f32;
     let frequency = Arc::new(Mutex::new(0.0f32)); // Will hold the frequency
     let frequency_clone = frequency.clone();
-
-    let mut amplitude = 0.0f32;
     let target_amplitude = 0.5; // Desired amplitude
-    let ramp_speed = 0.01; // Speed of the ramp for smoothing
-
-    let release_ramp_speed = target_amplitude / (sample_rate * RELEASE_TIME_SECONDS);
-
-    let mut releasing = false;
 
     let mut next_value = move || {
         let freq = *frequency.lock().unwrap();
-        if freq > 0.0 {
-            releasing = false;
-            if amplitude < target_amplitude {
-                amplitude += ramp_speed; // Ramp up the amplitude
-            }
-        } else {
-            if !releasing {
-                releasing = true;
-            }
-            if amplitude > 0.0 {
-                amplitude -= release_ramp_speed; // Ramp down the amplitude
-            }
-        }
+        let amplitude_multiplier = velocity as f32 / 127.0;
         sample_clock = (sample_clock + 1.0) % sample_rate;
-        (sample_clock * freq * 2.0 * std::f32::consts::PI / sample_rate).sin() * amplitude
+        (sample_clock * freq * 2.0 * std::f32::consts::PI / sample_rate).sin()
+            * target_amplitude
+            * amplitude_multiplier
     };
 
     let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
@@ -142,7 +127,7 @@ where
             write_data(data, channels, &mut next_value)
         },
         err_fn,
-        None, // Added Option<Duration>
+        None,
     )?;
     stream.play()?;
 
@@ -156,11 +141,25 @@ where
                     if current_octave > 0 {
                         current_octave -= 1;
                     }
+                    println!("octave: {} velocity: {}", current_octave, velocity);
+                    std::io::stdout().flush()?; // Flush the buffer immediately
                 }
                 KeyCode::Char('x') => {
                     if current_octave < 8 {
                         current_octave += 1;
                     }
+                    println!("octave: {} velocity: {}", current_octave, velocity);
+                    std::io::stdout().flush()?; // Flush the buffer immediately
+                }
+                KeyCode::Char('c') => {
+                    velocity = (velocity as i32 - 10).max(0) as u8;
+                    println!("octave: {} velocity: {}", current_octave, velocity);
+                    std::io::stdout().flush()?; // Flush the buffer immediately
+                }
+                KeyCode::Char('v') => {
+                    velocity = (velocity as i32 + 10).min(127) as u8;
+                    println!("octave: {} velocity: {}", current_octave, velocity);
+                    std::io::stdout().flush()?; // Flush the buffer immediately
                 }
                 KeyCode::Char(c) => {
                     if let Some(&(note, octave_offset)) = KEY_MAP.get(&c) {
